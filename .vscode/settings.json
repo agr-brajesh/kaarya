@@ -1,0 +1,24 @@
+{
+  "python.analysis.extraPaths": ["${workspaceFolder}"],
+  "python.analysis.typeCheckingMode": "basic",
+  "python.terminal.activateEnvironment": true,
+  "editor.rulers": [88],
+  "editor.tabSize": 4,
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/kaarya.db": true,
+    "**/kaarya.db-journal": true
+  },
+  "search.exclude": {
+    "**/db_*_text": true
+  },
+  "[python]": {
+    "editor.formatOnSave": false
+  },
+  "[json]": {
+    "editor.formatOnSave": true
+  }
+}

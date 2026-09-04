@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kaarya — match the work, not the resume</title>
+<style>
+  :root{color-scheme:light; --ink:#16241f; --mut:#5c6b66; --line:#dfe5e2;
+        --ok:#1c7a4a; --warn:#b45309; --bad:#b3261e; --bg:#fbfaf7; --card:#fff;}
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--ink)}
+  header{padding:20px 24px;border-bottom:1px solid var(--line);background:var(--card)}
+  h1{margin:0;font-size:20px} h1 small{color:var(--mut);font-weight:400}
+  main{max-width:1080px;margin:0 auto;padding:24px;display:grid;gap:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px}
+  h2{margin:0 0 12px;font-size:16px}
+  label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+  textarea,input,select{width:100%;padding:9px;border:1px solid var(--line);
+       border-radius:7px;font:inherit;background:#fff;color:var(--ink)}
+  textarea{min-height:110px}
+  .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+  button{padding:10px 16px;border:1px solid var(--ink);border-radius:7px;
+       background:var(--ink);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+  button.alt{background:#fff;color:var(--ink)}
+  button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-visible
+       {outline:3px solid #2563eb;outline-offset:2px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+  .tag{font-size:12px;font-weight:700;padding:2px 7px;border-radius:999px;white-space:nowrap}
+  .covered{background:#e6f4ec;color:var(--ok)} .coachable{background:#fef3c7;color:var(--warn)}
+  .accommodatable{background:#e0edff;color:#1d4ed8} .gap{background:#f1f3f2;color:var(--mut)}
+  .access-blocked{background:#fdecea;color:var(--bad)}
+  .big{font-size:30px;font-weight:800;letter-spacing:-.02em}
+  .mut{color:var(--mut);font-size:13px}
+  .pass{color:var(--ok);font-weight:700} .fail{color:var(--bad);font-weight:700}
+  .banner{padding:10px 14px;border-radius:8px;background:#fef3c7;color:#78350f;font-size:14px}
+</style>
+</head>
+<body>
+<header><h1>Kaarya <small>— match the work, not the résumé</small></h1></header>
+<main>
+  <div id="warn" class="banner" hidden role="status"></div>
+
+  <section class="card" aria-labelledby="h-in">
+    <h2 id="h-in">1. What can this person do?</h2>
+    <label for="text">Describe the work in your own words (no résumé needed)</label>
+    <textarea id="text" aria-describedby="hint"></textarea>
+    <p id="hint" class="mut">Only this text is scored. The fields below are recorded
+      for the audit trail and are never used in the match.</p>
+    <div class="row">
+      <div><label for="role">Target role</label><select id="role"></select></div>
+      <div><label for="lim">Functional limitation</label><select id="lim">
+        <option value="">none</option><option>hearing</option><option>vision</option>
+        <option>speech</option><option>dexterity</option><option>mobility</option>
+        <option>schedule</option></select></div>
+      <div><label for="inst">Institution</label><input id="inst"></div>
+      <div><label for="gap">Career gap (months)</label><input id="gap" type="number" value="0"></div>
+    </div>
+    <p><button id="go">Match on tasks</button>
+       <button id="twin" class="alt">Run the twin test</button></p>
+  </section>
+
+  <section class="card" id="out" hidden aria-labelledby="h-out" aria-live="polite">
+    <h2 id="h-out">2. Task-level result</h2>
+    <p><span class="big" id="score"></span> <span class="mut" id="sub"></span></p>
+    <table><caption class="mut" style="text-align:left;padding-bottom:6px">
+      Every task, with the evidence that covered it</caption>
+      <thead><tr><th>Task</th><th>Verdict</th><th>Sim</th><th>Evidence / fix</th></tr></thead>
+      <tbody id="tasks"></tbody></table>
+    <div id="carve"></div>
+  </section>
+
+  <section class="card" id="tout" hidden aria-labelledby="h-t" aria-live="polite">
+    <h2 id="h-t">3. Twin test — same skills, one attribute flipped</h2>
+    <div id="tsum"></div>
+    <table><thead><tr><th>Attribute flipped</th><th>Kaarya Δrank</th>
+      <th>Naive ATS Δrank</th><th>Naive Δscore</th></tr></thead>
+      <tbody id="twins"></tbody></table>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const profile = () => ({
+  text: $('text').value, role_code: $('role').value,
+  limitations: $('lim').value ? [$('lim').value] : [],
+  institution: $('inst').value, gap_months: +$('gap').value || 0
+});
+const post = (u, b) => fetch(u, {method:'POST', headers:{'Content-Type':'application/json'},
+  body: JSON.stringify(b)}).then(r => r.json());
+
+fetch('/api/health').then(r=>r.json()).then(h=>{
+  $('role').innerHTML = h.roles.map(r=>`<option value="${r.code}">${r.title}</option>`).join('');
+  if (h.warning){ $('warn').textContent = h.warning; $('warn').hidden = false; }
+});
+
+$('go').onclick = async () => {
+  const d = await post('/api/match', profile());
+  const m = d.match;
+  $('out').hidden = false;
+  $('score').textContent = m.score + '%';
+  $('sub').textContent = `evidence-backed fit · ${m.accessible_pct}% of this role is accessible `
+    + `· ${m.counts.covered} of ${m.n_tasks} tasks covered`;
+  $('tasks').innerHTML = m.tasks.map(t => `<tr>
+    <td>${t.task}</td>
+    <td><span class="tag ${t.verdict}">${t.verdict}</span></td>
+    <td>${t.similarity}</td>
+    <td class="mut">${t.accommodation ? '🛠 ' + t.accommodation.name
+        + (t.accommodation.resolves ? '' : ' — cannot be accommodated, carve it')
+      : (t.evidence ? t.evidence + ` <em>(${t.evidence_tier})</em>` : '—')}</td></tr>`).join('');
+  $('carve').innerHTML = d.carving.needed
+    ? `<h2 style="margin-top:18px">Requisition carving</h2>` + d.carving.proposals.map(p =>
+        `<p><strong>${p.recommended ? 'Recommended' : 'Tradeoff'} — ${p.type}:</strong>
+         ${p.detail} <span class="mut">Task coverage after: ${p.coverage_after}%</span></p>`).join('')
+    : '';
+};
+
+$('twin').onclick = async () => {
+  const r = await post('/api/audit', profile());
+  $('tout').hidden = false;
+  const c = r.combined;
+  $('tsum').innerHTML = `<p class="mut">Starting from the advantaged presentation,
+    then flipping one attribute at a time. Pool of ${r.pool_size}.</p>
+    <p>Presented as herself — <strong>Kaarya:</strong>
+      #${c.kaarya.rank_privileged} → #${c.kaarya.rank_as_herself}
+      &nbsp;·&nbsp; <strong>Naive ATS:</strong>
+      #${c.naive.rank_privileged} → #${c.naive.rank_as_herself}</p>
+    <p class="${r.quarantined ? 'fail' : 'pass'}">${r.verdict}</p>`;
+  $('twins').innerHTML = r.twins.map(t => `<tr><td>${t.attribute}</td>
+    <td class="${t.kaarya_delta_rank ? 'fail' : 'pass'}">${t.kaarya_delta_rank}</td>
+    <td class="${t.naive_delta_rank ? 'fail' : ''}">${t.naive_delta_rank}</td>
+    <td>${t.naive_delta_score}</td></tr>`).join('');
+};
+</script>
+</body>
+</html>

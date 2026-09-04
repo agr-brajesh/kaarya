@@ -1,0 +1,14 @@
+# Kaarya dependencies. Pinned on purpose: a hackathon is the worst possible
+# time to discover a breaking minor release.
+#
+# TIER 1 -- the demo runs on this alone (python demo.py, python serve.py)
+numpy==2.1.3
+#
+# TIER 2 -- the FastAPI surface (python app.py path). serve.py needs neither.
+fastapi==0.115.6
+uvicorn==0.34.0
+#
+# TIER 3 -- real semantic matching. ~90 MB model, CPU only, downloads once.
+# Install torch CPU first on Windows/Linux to avoid pulling CUDA wheels:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+sentence-transformers==3.3.1

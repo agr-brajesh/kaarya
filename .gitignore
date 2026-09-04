@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+# SQLite is rebuilt by seed.build_db() / onet_import.py on every run
+kaarya.db
+kaarya.db-journal
+# O*NET bulk download and model cache -- large, re-downloadable
+db_*_text/
+.cache/
+*.zip
+.venv/

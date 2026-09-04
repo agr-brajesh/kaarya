@@ -1,0 +1,61 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Checks (run this first)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/test_kaarya.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Demo (narrated end-to-end)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/demo.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Server: stdlib (no pip needed)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/serve.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "serverReadyAction": {
+        "pattern": "http://([0-9.]+):([0-9]+)",
+        "uriFormat": "http://%s:%s",
+        "action": "openExternally"
+      }
+    },
+    {
+      "name": "Server: FastAPI (uvicorn)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app:api", "--reload", "--host", "127.0.0.1", "--port", "8000"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Import O*NET (prompts for folder)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/onet_import.py",
+      "args": ["${input:onetDir}"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "onetDir",
+      "type": "promptString",
+      "description": "Path to the unzipped O*NET text release (e.g. ./db_29_0_text)",
+      "default": "./db_29_0_text"
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "1. Install (numpy only)",
+      "type": "shell",
+      "command": "python -m pip install numpy",
+      "problemMatcher": [],
+      "detail": "The minimum needed for demo.py, test_kaarya.py and serve.py."
+    },
+    {
+      "label": "2. Install (everything, incl. real embeddings)",
+      "type": "shell",
+      "command": "python -m pip install torch --index-url https://download.pytorch.org/whl/cpu && python -m pip install -r requirements.txt",
+      "problemMatcher": [],
+      "detail": "Torch CPU wheels first so pip does not pull ~2 GB of CUDA."
+    },
+    {
+      "label": "3. Run checks",
+      "type": "shell",
+      "command": "python test_kaarya.py",
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": [],
+      "detail": "27 checks. Run before every commit and before the demo."
+    },
+    {
+      "label": "4. Run demo",
+      "type": "shell",
+      "command": "python demo.py",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": [],
+      "detail": "The full narrated end-to-end run."
+    },
+    {
+      "label": "5. Serve (stdlib)",
+      "type": "shell",
+      "command": "python serve.py",
+      "isBackground": true,
+      "problemMatcher": [],
+      "detail": "http://127.0.0.1:8000 -- works even if pip is broken."
+    },
+    {
+      "label": "Which embedder am I on?",
+      "type": "shell",
+      "command": "python -c \"from engine import embedder; print(embedder().name)\"",
+      "problemMatcher": [],
+      "detail": "'hash-fallback' means offline lexical matching. Install sentence-transformers for 'all-MiniLM-L6-v2'."
+    }
+  ]
+}
