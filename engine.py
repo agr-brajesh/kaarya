@@ -186,7 +186,7 @@ def accommodation_for(domain: str, statement: str) -> dict | None:
 
 # ------------------------------------------------------------- data classes
 
-TIER_WEIGHT = {"self-declared": 0.55, "corroborated": 0.8, "demonstrated": 1.0}
+TIER_WEIGHT = {"self-declared": 0.55, "corroborated": 0.8, "demonstrated": 1.0, "inferred": 0.40}
 
 
 @dataclass

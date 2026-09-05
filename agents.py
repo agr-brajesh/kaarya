@@ -38,21 +38,291 @@ def llm(prompt: str, system: str = "Reply with JSON only.") -> str | None:
         return None
 
 
-# ------------------------------------------------------- 1. Evidence Agent
+# ------------------------------------------------ 1. Skills Discovery Agent
 
 ACTION_VERBS = ("handled", "built", "reconcil", "managed", "resolved", "wrote",
                 "prepared", "tracked", "trained", "supported", "audited", "fixed",
                 "documented", "tested", "designed", "answered", "processed",
                 "verified", "escalated", "maintained", "coordinated", "analysed",
-                "analyzed", "created", "updated", "reviewed", "operated")
+                "analyzed", "created", "updated", "reviewed", "operated", "queried",
+                "automated", "debugged", "configured", "monitored", "deployed")
 
-EXTRACT_PROMPT = """Extract concrete work-skill statements from this self-description.
+EXTRACT_PROMPT = """Extract concrete work-skill statements from this candidate profile or self-description.
 Rules: keep the person's own wording; one action per statement; ignore any mention of
 college, employer prestige, gender, city or career gaps.
 Return {"claims": [{"statement": str, "tier": "self-declared"}]}.
 
 TEXT:
 %s"""
+
+DISCOVERY_MULTI_PROMPT = """You are a Skill Discovery Agent (SAP Talent Intelligence Hub style).
+Analyze the candidate's profile across all provided sources (resume, micro-credentials, projects, informal learning).
+Surface concrete, action-oriented skill statements and infer adjacent abilities.
+Strict rule: Ignore any pedigree signals (institutions, GPA, career gap length, demographics, city tiers).
+
+Return JSON with:
+{
+  "claims": [{"statement": str, "tier": "self-declared" | "corroborated", "source": str}],
+  "pedigree_signals_removed": [str]
+}
+
+PROFILE:
+%s"""
+
+PEDIGREE_PATTERNS = [
+    (r"\b(graduated from|studied at|alumnus of|alumna of|degree from|b\.?tech from|bachelor'?s from)\s+[^.,;\n]+", "Institution mention"),
+    (r"\b(iit|nit|iim|bits|stanford|harvard|oxford|cambridge|tier[- ]?1 college)\b", "College brand marker"),
+    (r"\b(gpa|cgpa|percentage|marks)[:\s]+\d+(\.\d+)?(%|/\d+)?\b", "Academic grade filter"),
+    (r"\b(\d+[- ]?(year|month|yr) (career )?(gap|break)|maternity break|caregiver break)\b", "Career gap penalty"),
+    (r"\b(tier[- ]?[123] city|metro only|located in [A-Za-z\s]+)\b", "Geographic pedigree proxy"),
+    (r"\b(male|female|he/him|she/her|age \d+|\d+ years old)\b", "Demographic attribute"),
+]
+
+
+def strip_pedigree_signals(text: str) -> tuple[str, list[str]]:
+    """Strip credential and pedigree markers before skill extraction."""
+    removed = []
+    cleaned = text
+    for pat, label in PEDIGREE_PATTERNS:
+        matches = re.findall(pat, cleaned, flags=re.I)
+        if matches:
+            for m in matches:
+                matched_str = m[0] if isinstance(m, tuple) else m
+                removed.append(f"{label}: '{matched_str.strip()}'")
+            cleaned = re.sub(pat, " ", cleaned, flags=re.I)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned, removed
+
+
+# ---------------------------------- Skill Knowledge Graph & Ontology (TIH Style)
+
+SKILL_GRAPH_NODES = {
+    "spreadsheet_reconciliation": {
+        "title": "Spreadsheet Reconciliation & Ledger Audit",
+        "domain": "Financial & Data Operations",
+        "keywords": ["reconcil", "ledger", "invoice", "excel", "spreadsheet", "duplicate", "vlookup"],
+        "canonical_statement": "Reconciled financial records, invoices, and ledgers in spreadsheets to resolve discrepancies",
+        "adjacencies": [
+            {"target": "sql_data_validation", "relation": "adjacent_to", "weight": 0.85,
+             "explanation": "Cross-system ledger reconciliation frequently uses SQL query verification."},
+            {"target": "data_cleaning_dedup", "relation": "frequently_cooccurs_with", "weight": 0.90,
+             "explanation": "Duplicate record identification directly translates to structured data deduplication."},
+            {"target": "financial_reporting", "relation": "specializes", "weight": 0.80,
+             "explanation": "Reconciled ledger data feeds period-end balance sheet and variance reports."},
+        ],
+    },
+    "sql_data_validation": {
+        "title": "SQL Database Querying & Data Validation",
+        "domain": "Data Operations",
+        "keywords": ["sql", "query", "database", "rdbms", "table", "join", "select"],
+        "canonical_statement": "Queried relational databases and validated data records across source tables",
+        "adjacencies": [
+            {"target": "spreadsheet_reconciliation", "relation": "adjacent_to", "weight": 0.85,
+             "explanation": "Validating relational table outputs pairs with spreadsheet audit routines."},
+            {"target": "etl_pipeline_monitoring", "relation": "adjacent_to", "weight": 0.78,
+             "explanation": "Query validation skills underpin automated ETL data extraction checks."},
+            {"target": "bi_dashboard_reporting", "relation": "prerequisite_for", "weight": 0.82,
+             "explanation": "SQL extraction is foundational for feeding business intelligence metrics."},
+        ],
+    },
+    "data_cleaning_dedup": {
+        "title": "Data Cleaning & Anomaly Resolution",
+        "domain": "Data Operations",
+        "keywords": ["clean", "dedup", "duplicate", "null", "transform", "normalize", "sanitize"],
+        "canonical_statement": "Cleaned datasets, eliminated duplicate entries, and corrected inconsistent records",
+        "adjacencies": [
+            {"target": "spreadsheet_reconciliation", "relation": "adjacent_to", "weight": 0.90,
+             "explanation": "Core hygiene step in financial and operational ledger maintenance."},
+            {"target": "sql_data_validation", "relation": "adjacent_to", "weight": 0.80,
+             "explanation": "Automated deduplication logic is commonly authored in SQL transformations."},
+        ],
+    },
+    "financial_reporting": {
+        "title": "Financial Variance & Management Reporting",
+        "domain": "Financial Operations",
+        "keywords": ["balance sheet", "variance report", "financial report", "period end", "p&l", "budget"],
+        "canonical_statement": "Prepared periodic financial reports and analyzed budget variance metrics",
+        "adjacencies": [
+            {"target": "spreadsheet_reconciliation", "relation": "prerequisite_for", "weight": 0.85,
+             "explanation": "Accurate ledger reconciliation forms the factual foundation for management reports."},
+            {"target": "bi_dashboard_reporting", "relation": "adjacent_to", "weight": 0.80,
+             "explanation": "Financial metrics are visualized through operational reporting dashboards."},
+        ],
+    },
+    "etl_pipeline_monitoring": {
+        "title": "ETL Pipeline & Data Flow Monitoring",
+        "domain": "Data Engineering",
+        "keywords": ["etl", "pipeline", "ingestion", "data flow", "batch job", "cron"],
+        "canonical_statement": "Monitored scheduled ETL data pipelines and verified data ingestion completeness",
+        "adjacencies": [
+            {"target": "sql_data_validation", "relation": "frequently_cooccurs_with", "weight": 0.82,
+             "explanation": "Pipeline validation relies on automated SQL sanity checks."},
+        ],
+    },
+    "bi_dashboard_reporting": {
+        "title": "Business Intelligence (BI) Dashboarding",
+        "domain": "Analytics & Reporting",
+        "keywords": ["power bi", "tableau", "dashboard", "kpi", "visualization", "metrics"],
+        "canonical_statement": "Built interactive business intelligence dashboards to track organizational KPIs",
+        "adjacencies": [
+            {"target": "sql_data_validation", "relation": "prerequisite_for", "weight": 0.85,
+             "explanation": "Dashboards require structured SQL query models for reliable metric feeds."},
+        ],
+    },
+    "crm_case_management": {
+        "title": "CRM Case & Ticket Resolution",
+        "domain": "Customer & Business Operations",
+        "keywords": ["crm", "ticket", "case", "zendesk", "salesforce", "jira", "inbound", "queue"],
+        "canonical_statement": "Managed and resolved customer support tickets and case logs in CRM software",
+        "adjacencies": [
+            {"target": "customer_deescalation", "relation": "frequently_cooccurs_with", "weight": 0.88,
+             "explanation": "Handling complex CRM tickets directly involves customer de-escalation skills."},
+            {"target": "sla_tracking", "relation": "adjacent_to", "weight": 0.82,
+             "explanation": "Managing ticket queues requires tracking SLA response and resolution times."},
+            {"target": "process_documentation", "relation": "prerequisite_for", "weight": 0.78,
+             "explanation": "Documenting resolved issues forms standard troubleshooting knowledge bases."},
+        ],
+    },
+    "customer_deescalation": {
+        "title": "Customer Conflict De-escalation",
+        "domain": "Customer Operations",
+        "keywords": ["de-escalat", "escalat", "dispute", "complaint", "conflict", "retention"],
+        "canonical_statement": "De-escalated customer disputes and mediated resolution for high-priority complaints",
+        "adjacencies": [
+            {"target": "crm_case_management", "relation": "frequently_cooccurs_with", "weight": 0.88,
+             "explanation": "De-escalation outcomes are documented and tracked via CRM workflows."},
+            {"target": "multi_channel_support", "relation": "adjacent_to", "weight": 0.84,
+             "explanation": "De-escalation applies across live chat, email, and ticketing channels."},
+        ],
+    },
+    "sla_tracking": {
+        "title": "SLA Tracking & Queue Operations",
+        "domain": "Operations Management",
+        "keywords": ["sla", "service level", "turnaround time", "queue priority", "backlog"],
+        "canonical_statement": "Monitored support queue response times to maintain SLA turnaround compliance",
+        "adjacencies": [
+            {"target": "crm_case_management", "relation": "frequently_cooccurs_with", "weight": 0.85,
+             "explanation": "SLA metrics guide ticket prioritization in CRM systems."},
+        ],
+    },
+    "multi_channel_support": {
+        "title": "Omnichannel Customer Communication",
+        "domain": "Customer Support",
+        "keywords": ["chat support", "email support", "omnichannel", "messaging support", "helpdesk"],
+        "canonical_statement": "Delivered asynchronous customer support across live chat, email, and ticketing portals",
+        "adjacencies": [
+            {"target": "customer_deescalation", "relation": "adjacent_to", "weight": 0.85,
+             "explanation": "De-escalation techniques adapt to written asynchronous chat channels."},
+        ],
+    },
+    "process_documentation": {
+        "title": "Standard Operating Procedure (SOP) Authoring",
+        "domain": "Operational Excellence",
+        "keywords": ["document", "sop", "guide", "workflow", "manual", "handbook", "procedure"],
+        "canonical_statement": "Authored standard operating procedures and technical documentation for team workflows",
+        "adjacencies": [
+            {"target": "crm_case_management", "relation": "adjacent_to", "weight": 0.78,
+             "explanation": "Capturing case resolutions creates repeatable support playbooks."},
+            {"target": "quality_assurance_audit", "relation": "prerequisite_for", "weight": 0.80,
+             "explanation": "Clear SOPs enable systematic peer review and compliance auditing."},
+        ],
+    },
+    "quality_assurance_audit": {
+        "title": "Quality Assurance & Workflow Auditing",
+        "domain": "Operational Excellence",
+        "keywords": ["qa audit", "quality assurance", "compliance check", "peer review", "inspection"],
+        "canonical_statement": "Audited operational workflows and ticket resolutions against QA compliance standards",
+        "adjacencies": [
+            {"target": "process_documentation", "relation": "adjacent_to", "weight": 0.82,
+             "explanation": "QA audits evaluate adherence to established SOP documentation."},
+        ],
+    },
+    "inventory_logistics_tracking": {
+        "title": "Inventory & Shipment Tracking",
+        "domain": "Logistics & Supply Chain",
+        "keywords": ["inventory", "shipment", "warehouse", "stock", "dispatch", "order tracking"],
+        "canonical_statement": "Tracked warehouse stock levels, purchase orders, and dispatched shipments",
+        "adjacencies": [
+            {"target": "vendor_order_management", "relation": "adjacent_to", "weight": 0.84,
+             "explanation": "Inventory management directly interfaces with vendor purchase order tracking."},
+            {"target": "spreadsheet_reconciliation", "relation": "adjacent_to", "weight": 0.76,
+             "explanation": "Periodic stock counts are reconciled against procurement ledgers."},
+        ],
+    },
+    "vendor_order_management": {
+        "title": "Vendor Purchase Order Management",
+        "domain": "Supply Chain & Procurement",
+        "keywords": ["purchase order", "po tracking", "vendor coordination", "supplier delivery"],
+        "canonical_statement": "Managed vendor purchase orders, delivery timelines, and fulfillment tracking",
+        "adjacencies": [
+            {"target": "inventory_logistics_tracking", "relation": "adjacent_to", "weight": 0.84,
+             "explanation": "Purchase orders directly correspond to inbound inventory batches."},
+        ],
+    },
+}
+
+
+class SkillKnowledgeGraph:
+    """Skill Knowledge Graph for adjacent skill discovery (Talent Intelligence Hub style)."""
+
+    def __init__(self, nodes: dict = SKILL_GRAPH_NODES):
+        self.nodes = nodes
+
+    def match_node(self, text: str) -> tuple[str | None, float]:
+        """Find the closest knowledge graph node for a given skill text."""
+        s = text.lower()
+        best_node, best_score = None, 0.0
+        for node_id, data in self.nodes.items():
+            matches = sum(1 for kw in data["keywords"] if kw in s)
+            if matches > 0:
+                score = min(1.0, matches * 0.35 + 0.30)
+                if score > best_score:
+                    best_node, best_score = node_id, score
+        return best_node, best_score
+
+    def infer_adjacent_skills(self, claims: list[SkillClaim],
+                              top_k: int = 4, min_confidence: float = 0.40) -> list[dict]:
+        """Traverse the knowledge graph to infer adjacent and prerequisite capabilities."""
+        existing_statements = " ".join(c.statement.lower() for c in claims)
+        inferred = []
+        seen_targets = set()
+
+        for claim in claims:
+            matched_node_id, match_score = self.match_node(claim.statement)
+            if not matched_node_id:
+                continue
+            node = self.nodes[matched_node_id]
+            for adj in node["adjacencies"]:
+                target_id = adj["target"]
+                if target_id in seen_targets:
+                    continue
+                target_node = self.nodes.get(target_id)
+                if not target_node:
+                    continue
+
+                # Only skip if the exact title or canonical statement is largely present
+                if target_node["title"].lower() in existing_statements:
+                    continue
+
+                confidence = round(match_score * adj["weight"], 3)
+                if confidence >= min_confidence:
+                    seen_targets.add(target_id)
+                    inferred.append({
+                        "skill_id": target_id,
+                        "title": target_node["title"],
+                        "statement": target_node["canonical_statement"],
+                        "confidence": confidence,
+                        "relation": adj["relation"],
+                        "domain": target_node["domain"],
+                        "inferred_from": claim.statement,
+                        "explanation": adj["explanation"],
+                    })
+
+        inferred.sort(key=lambda x: x["confidence"], reverse=True)
+        return inferred[:top_k]
+
+
+_SKILL_GRAPH = SkillKnowledgeGraph()
 
 
 def _segment(text: str) -> list[str]:
@@ -84,8 +354,9 @@ def _segment(text: str) -> list[str]:
 
 
 def extract_claims(text: str) -> list[SkillClaim]:
-    """Skills Discovery. LLM if a key exists, else clause-splitting fallback."""
-    out = llm(EXTRACT_PROMPT % text)
+    """Skills Discovery: Extracts work-skill statements, stripping pedigree signals."""
+    cleaned_text, _ = strip_pedigree_signals(text)
+    out = llm(EXTRACT_PROMPT % cleaned_text)
     if out:
         try:
             return [SkillClaim(statement=c["statement"],
@@ -93,15 +364,135 @@ def extract_claims(text: str) -> list[SkillClaim]:
                     for c in json.loads(out)["claims"]][:12]
         except Exception:                        # noqa: BLE001
             pass
-    claims = [s for s in _segment(text)
+    claims = [s for s in _segment(cleaned_text)
               if len(s.split()) >= 3 and any(v in s.lower() for v in ACTION_VERBS)]
     if not claims:      # no verb we recognise: fall back to punctuation clauses
-        claims = [s.strip() for s in re.split(r"[.;,\n]", text)
+        claims = [s.strip() for s in re.split(r"[.;,\n]", cleaned_text)
                   if len(s.split()) >= 4]
     seen: set[str] = set()
     uniq = [s for s in claims if not (s.lower() in seen or seen.add(s.lower()))]
     return ([SkillClaim(statement=s) for s in uniq[:12]]
-            or [SkillClaim(statement=text.strip()[:200])])
+            or [SkillClaim(statement=cleaned_text.strip()[:200])])
+
+
+def discover_skills(profile_data: str | dict,
+                    include_adjacent: bool = True) -> dict:
+    """Complete Skills Discovery Agent.
+
+    Analyzes multi-source candidate profiles (resumes, projects, micro-credentials,
+    informal learning, self-descriptions) and infers adjacent skills via the
+    Skill Knowledge Graph. Crucially strips pedigree markers to surface pure ability.
+    """
+    direct_claims: list[SkillClaim] = []
+    pedigree_removed: list[str] = []
+    sources_analyzed: list[str] = []
+
+    if isinstance(profile_data, str):
+        cleaned, removed = strip_pedigree_signals(profile_data)
+        pedigree_removed.extend(removed)
+        sources_analyzed.append("unstructured_profile")
+        direct_claims.extend(extract_claims(cleaned))
+    elif isinstance(profile_data, dict):
+        # 1. Self-description / Resume text
+        if profile_data.get("text") or profile_data.get("resume_text"):
+            raw = str(profile_data.get("text") or profile_data.get("resume_text"))
+            cleaned, removed = strip_pedigree_signals(raw)
+            pedigree_removed.extend(removed)
+            sources_analyzed.append("resume_text")
+            direct_claims.extend(extract_claims(cleaned))
+
+        # 2. Micro-credentials / Certifications (corroborated)
+        micro_creds = profile_data.get("micro_credentials") or profile_data.get("certifications") or []
+        if isinstance(micro_creds, list):
+            for mc in micro_creds:
+                sources_analyzed.append("micro_credentials")
+                if isinstance(mc, dict):
+                    name = mc.get("name", "Certification")
+                    skills = mc.get("skills", [])
+                    issuer = mc.get("issuer", "verified_provider")
+                    if skills:
+                        for sk in skills:
+                            direct_claims.append(SkillClaim(
+                                statement=f"Demonstrated {sk} via {name}",
+                                tier="corroborated", source=f"cert:{issuer}"))
+                    else:
+                        direct_claims.append(SkillClaim(
+                            statement=f"Completed {name} covering core competencies",
+                            tier="corroborated", source=f"cert:{issuer}"))
+                elif isinstance(mc, str):
+                    cleaned, _ = strip_pedigree_signals(mc)
+                    direct_claims.append(SkillClaim(
+                        statement=cleaned, tier="corroborated", source="micro_credential"))
+
+        # 3. Project Work / Portfolios (corroborated with project artifacts)
+        projects = profile_data.get("projects") or profile_data.get("portfolio") or []
+        if isinstance(projects, list):
+            for proj in projects:
+                sources_analyzed.append("project_work")
+                if isinstance(proj, dict):
+                    title = proj.get("title", "Project")
+                    desc = proj.get("description", "")
+                    cleaned_desc, _ = strip_pedigree_signals(desc)
+                    claims_from_proj = _segment(cleaned_desc)
+                    if claims_from_proj:
+                        for cl in claims_from_proj[:3]:
+                            direct_claims.append(SkillClaim(
+                                statement=f"{cl} on {title}",
+                                tier="corroborated", source=f"project:{title}"))
+                    elif cleaned_desc:
+                        direct_claims.append(SkillClaim(
+                            statement=f"{title}: {cleaned_desc}",
+                            tier="corroborated", source=f"project:{title}"))
+                elif isinstance(proj, str):
+                    cleaned_proj, _ = strip_pedigree_signals(proj)
+                    direct_claims.append(SkillClaim(
+                        statement=cleaned_proj, tier="corroborated", source="project"))
+
+        # 4. Informal Learning & Open Source
+        informal = profile_data.get("informal_learning") or []
+        if isinstance(informal, list):
+            for item in informal:
+                sources_analyzed.append("informal_learning")
+                cleaned_item, _ = strip_pedigree_signals(str(item))
+                direct_claims.append(SkillClaim(
+                    statement=cleaned_item, tier="self-declared", source="informal_learning"))
+
+        # 5. Explicit self-reported skills
+        self_skills = profile_data.get("self_reported_skills") or profile_data.get("capabilities") or []
+        if isinstance(self_skills, list):
+            for sk in self_skills:
+                sources_analyzed.append("self_reported_skills")
+                cleaned_sk, _ = strip_pedigree_signals(str(sk))
+                direct_claims.append(SkillClaim(
+                    statement=cleaned_sk, tier="self-declared", source="self"))
+
+    # Deduplicate direct claims
+    seen_stmts: set[str] = set()
+    deduped_claims: list[SkillClaim] = []
+    for c in direct_claims:
+        key = c.statement.lower().strip()
+        if key and key not in seen_stmts:
+            seen_stmts.add(key)
+            deduped_claims.append(c)
+
+    # Infer adjacent skills via the Skill Knowledge Graph
+    adjacent_skills: list[dict] = []
+    if include_adjacent and deduped_claims:
+        adjacent_skills = _SKILL_GRAPH.infer_adjacent_skills(deduped_claims)
+
+    inferred_claims = [
+        SkillClaim(statement=adj["statement"], tier="inferred",
+                   source=f"knowledge_graph:{adj['skill_id']}")
+        for adj in adjacent_skills
+    ]
+
+    return {
+        "claims": deduped_claims,
+        "adjacent_skills": adjacent_skills,
+        "sources_analyzed": list(dict.fromkeys(sources_analyzed)),
+        "pedigree_filtered": pedigree_removed,
+        "all_claims": deduped_claims + inferred_claims,
+    }
 
 
 def promote(claims: list[SkillClaim], statement_substr: str, tier: str,

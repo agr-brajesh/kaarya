@@ -54,6 +54,8 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n) or b"{}")
             if path == "/api/match":
                 self._json(api_core.do_match(body))
+            elif path == "/api/skills/discover":
+                self._json(api_core.do_discover_skills(body))
             elif path == "/api/audit":
                 self._json(api_core.do_audit(body))
             elif path == "/api/promote":

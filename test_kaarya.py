@@ -130,13 +130,47 @@ def test_claim_segmentation() -> None:
           max(len(c.statement.split()) for c in claims) <= 15)
 
 
+def test_skills_discovery_agent() -> None:
+    """Skills Discovery Agent: multi-source profile, pedigree stripping, and Skill Graph."""
+    profile = {
+        "text": "IIT Bombay graduate with a 3-year career break. Reconciled vendor invoices and resolved ledger discrepancies in Excel.",
+        "micro_credentials": [
+            {"name": "Advanced Spreadsheet & Data Cleaning", "issuer": "Coursera",
+             "skills": ["data deduplication", "pivot tables"]}
+        ],
+        "projects": [
+            {"title": "Automated Billing Ledger",
+             "description": "Built automated spreadsheet models and audited transaction ledgers for small businesses"}
+        ],
+        "informal_learning": [
+            "Self-taught SQL querying through open-source databases"
+        ]
+    }
+    disc = agents.discover_skills(profile, include_adjacent=True)
+    check("multi-source profile ingests multiple sources",
+          len(disc["sources_analyzed"]) >= 3, f"{len(disc['sources_analyzed'])} sources")
+    check("pedigree signals are actively filtered",
+          len(disc["pedigree_filtered"]) >= 2, f"{len(disc['pedigree_filtered'])} removed")
+    all_stmts = " ".join(c.statement.lower() for c in disc["claims"])
+    check("IIT Bombay is stripped from skill claims", "iit" not in all_stmts)
+    check("career break length is stripped from skill claims", "3-year" not in all_stmts)
+    check("corroborated tier assigned to micro-credentials or projects",
+          any(c.tier == "corroborated" for c in disc["claims"]))
+    check("knowledge graph infers adjacent capabilities",
+          len(disc["adjacent_skills"]) > 0,
+          f"inferred: {[a['title'] for a in disc['adjacent_skills']]}")
+    adj = disc["adjacent_skills"][0]
+    check("adjacent skills carry explainability metadata",
+          "explanation" in adj and "inferred_from" in adj and "confidence" in adj)
+
+
 if __name__ == "__main__":
     from engine import embedder
     print(f"embedder: {embedder().name}\n")
     for fn in (test_no_pedigree_in_scorer, test_twin_test_direction,
                test_evidence_tiers_matter, test_accessibility_routing,
                test_pool_fairness, test_jd_rewrite_is_readable,
-               test_claim_segmentation):
+               test_claim_segmentation, test_skills_discovery_agent):
         print(fn.__name__)
         fn()
         print()

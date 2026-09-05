@@ -40,6 +40,12 @@ def api_match(p: Profile):
     return api_core.do_match(p.model_dump())
 
 
+@api.post("/api/skills/discover")
+def api_discover(body: dict):
+    """Run Skills Discovery Agent on multi-source profile data."""
+    return api_core.do_discover_skills(body)
+
+
 @api.post("/api/audit")
 def api_audit(p: Profile):
     """The twin test. This is the endpoint the demo clicks."""
