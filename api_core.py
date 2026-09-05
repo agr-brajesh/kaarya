@@ -74,12 +74,6 @@ def do_audit(body: dict) -> dict:
     return audit.twin_test(to_candidate(p), load_role(CON, p["role_code"]), POOL)
 
 
-def do_discover_skills(body: dict) -> dict:
-    """Run full Skills Discovery Agent across multi-source profile data."""
-    profile_data = body.get("profile") or body
-    return agents.discover_skills(profile_data, include_adjacent=True)
-
-
 def do_promote(body: dict, substring: str, source: str = "micro-task") -> dict:
     """Raise evidence to `demonstrated` after a micro-task passes."""
     p = clean(body)
